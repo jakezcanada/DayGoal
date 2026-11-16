@@ -58,7 +58,7 @@ create table if not exists public.user_settings (
 
 -- ---------- updated_at trigger ----------
 create or replace function public.touch_updated_at() returns trigger
-language plpgsql as $$ begin new.updated_at = now(); return new; end $$;
+language plpgsql set search_path = '' as $$ begin new.updated_at = now(); return new; end $$;
 
 drop trigger if exists t_day_entries on public.day_entries;
 create trigger t_day_entries before update on public.day_entries for each row execute function public.touch_updated_at();
@@ -95,7 +95,7 @@ end $$;
 
 -- ---------- Literal substring search across everything ----------
 create or replace function public.has_text(hay text, needle text, cs boolean)
-returns boolean language sql immutable as $$
+returns boolean language sql immutable set search_path = '' as $$
   select case when cs then strpos(coalesce(hay,''), needle) > 0
               else strpos(lower(coalesce(hay,'')), lower(needle)) > 0 end
 $$;

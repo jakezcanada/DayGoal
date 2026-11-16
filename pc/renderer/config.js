@@ -1,6 +1,6 @@
-// Fill these in from Supabase Dashboard -> Project Settings -> API.
-// The anon (public) key is safe to ship in a client app; Row Level Security protects the data.
+// Supabase project settings. The publishable key is safe to ship in a client app;
+// Row Level Security protects each user's data.
 window.DAYGOAL_CONFIG = {
-  SUPABASE_URL: 'https://YOUR-PROJECT-REF.supabase.co',
-  SUPABASE_ANON_KEY: 'YOUR-ANON-KEY'
+  SUPABASE_URL: 'https://qhykdkitkszvndxlcuui.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_1Cz0PxHDlDQrKQYmFe40yg_palYfyk9'
 };

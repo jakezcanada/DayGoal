@@ -59,6 +59,14 @@ function createWindow() {
     if (!quitting) { e.preventDefault(); win.hide(); }
   });
 
+  win.webContents.on('console-message', (e) => {
+    if (e.level === 'error' || e.level === 'warning') console.error(`[renderer ${e.level}] ${e.message}`);
+  });
+  win.webContents.on('render-process-gone', (_e, d) => {
+    console.error('[renderer gone]', d.reason, d.exitCode);
+    if (d.reason !== 'clean-exit' && !quitting) setTimeout(() => win?.reload(), 1000);
+  });
+
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) shell.openExternal(url);
     return { action: 'deny' };
