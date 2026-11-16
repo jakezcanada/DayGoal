@@ -142,7 +142,7 @@
         }
       };
       btn.onclick = submit;
-      for (const i of [email, pass, pass2]) if (i) i.onkeydown = (ev) => ev.key === 'Enter' && submit();
+      for (const i of [email, pass, pass2]) if (i) i.onkeydown = (ev) => { if (ev.key === 'Enter') submit(); };
 
       const card = h('div', { class: 'card' },
         h('div', { class: 'row', style: 'margin-bottom:14px' }, h('img', { src: '../assets/icon.png', width: 34, height: 34, style: 'border-radius:8px' })),
@@ -355,7 +355,7 @@
       if (!title.value.trim()) return;
       try { await db.addTask({ title: title.value.trim(), due_date: due.value || null }); render(); } catch (e) { fail(e); }
     };
-    title.onkeydown = (e) => e.key === 'Enter' && add();
+    title.onkeydown = (e) => { if (e.key === 'Enter') add(); };
 
     const tab = (id, label) => h('button', { class: S.taskFilter === id ? 'on' : '', onclick: () => { S.taskFilter = id; lsSet('taskFilter', id); render(); } }, label);
 
