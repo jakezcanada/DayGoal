@@ -11,8 +11,7 @@ supabase/  Database schema (run once)
 
 1. **Supabase** (free tier): create a project at https://supabase.com.
    - SQL Editor → paste and run `supabase/schema.sql`.
-   - Authentication → Sign In / Providers → Email: enabled (default).
-   - Authentication → Emails → Templates: in **Magic Link** and **Confirm signup**, add `{{ .Token }}` to the body (e.g. `Your DayGoal code: {{ .Token }}`). The app signs in with that code.
+   - Authentication → Sign In / Providers → Email: enabled, and turn **Confirm email** off (no emails are sent; sign-in is email + password).
    - Project Settings → API: copy the **Project URL** and **anon public key** into `pc/renderer/config.js`.
 2. **Run the PC app**
    ```
@@ -29,4 +28,4 @@ supabase/  Database schema (run once)
 
 ## Notes
 - Supabase free projects pause after ~1 week of no activity (daily use keeps it awake; resume from the dashboard if it happens).
-- The built-in Supabase email sender is rate-limited (a few emails/hour) — fine for personal use. You stay signed in, so codes are rarely needed.
+- No in-app password reset yet (it needs email sending), so keep your password somewhere safe.

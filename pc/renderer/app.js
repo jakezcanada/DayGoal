@@ -109,53 +109,51 @@
     search: (text, cs) => q(sb.rpc('search_all', { q: text, case_sensitive: cs }))
   };
 
-  // ---------- Auth (email one-time code) ----------
+  // ---------- Auth (email + password) ----------
   function renderAuth() {
-    let step = 'email';
-    let email = lsGet('lastEmail') || '';
+    let mode = 'signin'; // or 'signup'
     const draw = () => {
       $app.replaceChildren();
+      const isUp = mode === 'signup';
       const err = h('div', { class: 'err' });
+      const email = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', value: lsGet('lastEmail') || '', autocomplete: 'email' });
+      const pass = h('input', { class: 'input', type: 'password', placeholder: isUp ? 'Password (min 6 characters)' : 'Password', autocomplete: isUp ? 'new-password' : 'current-password', style: 'margin-top:10px' });
+      const pass2 = isUp && h('input', { class: 'input', type: 'password', placeholder: 'Confirm password', autocomplete: 'new-password', style: 'margin-top:10px' });
+      const btn = h('button', { class: 'btn primary', style: 'width:100%;margin-top:14px' }, isUp ? 'Create account' : 'Sign in');
+
+      const submit = async () => {
+        const e = email.value.trim(), p = pass.value;
+        err.textContent = '';
+        if (!e || !p) { err.textContent = 'Enter your email and password.'; return; }
+        if (isUp && p.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
+        if (isUp && p !== pass2.value) { err.textContent = 'Passwords don\'t match.'; return; }
+        btn.disabled = true;
+        lsSet('lastEmail', e);
+        const { data, error } = isUp
+          ? await sb.auth.signUp({ email: e, password: p })
+          : await sb.auth.signInWithPassword({ email: e, password: p });
+        btn.disabled = false;
+        if (error) { err.textContent = error.message; return; }
+        if (isUp && !data.session) {
+          // Happens only if "Confirm email" is still on in Supabase.
+          err.style.color = 'var(--muted)';
+          err.textContent = 'Account created. Check your email to confirm it, then sign in.';
+          mode = 'signin';
+        }
+      };
+      btn.onclick = submit;
+      for (const i of [email, pass, pass2]) if (i) i.onkeydown = (ev) => ev.key === 'Enter' && submit();
+
       const card = h('div', { class: 'card' },
         h('div', { class: 'row', style: 'margin-bottom:14px' }, h('img', { src: '../assets/icon.png', width: 34, height: 34, style: 'border-radius:8px' })),
-        h('h1', {}, 'DayGoal'));
-
-      if (step === 'email') {
-        const inp = h('input', { class: 'input', type: 'email', placeholder: 'you@example.com', value: email, autofocus: true });
-        const btn = h('button', { class: 'btn primary', style: 'width:100%;margin-top:12px' }, 'Email me a sign-in code');
-        const go = async () => {
-          email = inp.value.trim();
-          if (!email) return;
-          btn.disabled = true; err.textContent = '';
-          const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-          btn.disabled = false;
-          if (error) { err.textContent = error.message; return; }
-          lsSet('lastEmail', email);
-          step = 'code'; draw();
-        };
-        btn.onclick = go;
-        inp.onkeydown = (e) => e.key === 'Enter' && go();
-        card.append(h('p', { class: 'sub' }, 'Sign in or create an account with your email.'),
-          h('div', { style: 'margin-top:16px' }, inp), btn, err);
-      } else {
-        const inp = h('input', { class: 'input', inputmode: 'numeric', placeholder: 'Code from email', autofocus: true, maxlength: 10 });
-        const btn = h('button', { class: 'btn primary', style: 'width:100%;margin-top:12px' }, 'Verify & sign in');
-        const go = async () => {
-          const token = inp.value.replace(/\s/g, '');
-          if (!token) return;
-          btn.disabled = true; err.textContent = '';
-          const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
-          btn.disabled = false;
-          if (error) err.textContent = error.message;
-        };
-        btn.onclick = go;
-        inp.onkeydown = (e) => e.key === 'Enter' && go();
-        card.append(h('p', { class: 'sub' }, `We sent a code to ${email}.`),
-          h('div', { style: 'margin-top:16px' }, inp), btn, err,
-          h('button', { class: 'btn ghost sm', style: 'margin-top:10px', onclick: () => { step = 'email'; draw(); } }, 'Use a different email'));
-      }
+        h('h1', {}, 'DayGoal'),
+        h('p', { class: 'sub' }, isUp ? 'Create your account.' : 'Sign in to sync across your devices.'),
+        h('div', { style: 'margin-top:16px' }, email, pass, pass2),
+        btn, err,
+        h('button', { class: 'btn ghost sm', style: 'margin-top:10px', onclick: () => { mode = isUp ? 'signin' : 'signup'; draw(); } },
+          isUp ? 'Have an account? Sign in' : 'New here? Create an account'));
       $app.append(h('div', { class: 'auth' }, card));
-      card.querySelector('input')?.focus();
+      (email.value ? pass : email).focus();
     };
     draw();
   }
