@@ -161,7 +161,7 @@
   // ---------- Shell ----------
   const NAV = [
     ['today', 'Today', 'Ctrl+1'],
-    ['day', 'Journal', 'Ctrl+2'],
+    ['journal', 'Journal', 'Ctrl+2'],
     ['tasks', 'Long-term goals', 'Ctrl+3'],
     ['notes', 'Knowledge bank', 'Ctrl+4'],
     ['search', 'Search', 'Ctrl+F'],
@@ -174,7 +174,7 @@
     const side = h('nav', { class: 'side' },
       h('div', { class: 'brand' }, h('img', { src: '../assets/icon.png' }), 'DayGoal'),
       NAV.map(([id, label, key]) => h('button', {
-        class: 'nav' + (S.view === id ? ' active' : ''), 'data-view': id,
+        class: 'nav' + (navId(S.view) === id ? ' active' : ''), 'data-view': id,
         onclick: () => go(id)
       }, label, key && h('span', { class: 'k' }, key))),
       h('div', { class: 'spacer' }),
@@ -183,11 +183,13 @@
     $app.append(h('div', { class: 'shell' }, side, $main));
   }
 
+  // A single day opened from the journal highlights "Journal" in the sidebar.
+  const navId = (view) => (view === 'day' ? 'journal' : view);
   function go(view, opts = {}) {
     if (view === 'today') S.day = ymd();
     if (opts.day) S.day = opts.day;
     S.view = view;
-    document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+    document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.view === navId(view)));
     return render();
   }
 
@@ -195,7 +197,7 @@
   async function render() {
     if (!$main) return;
     const seq = ++renderSeq;
-    const views = { today: viewDay, day: viewDay, tasks: viewTasks, notes: viewNotes, search: viewSearch, settings: viewSettings };
+    const views = { today: viewDay, day: viewDay, journal: viewJournal, tasks: viewTasks, notes: viewNotes, search: viewSearch, settings: viewSettings };
     try {
       const el = await views[S.view]();
       if (seq !== renderSeq) return; // a newer render started
@@ -226,7 +228,9 @@
 
     const dateInput = h('input', { class: 'input', type: 'date', value: day, onchange: (e) => e.target.value && go('day', { day: e.target.value }) });
     const head = h('div', { class: 'head' },
-      h('div', {}, h('h1', {}, isToday ? 'Today' : prettyDay(day, { weekday: 'long', month: 'short', day: 'numeric' })),
+      h('div', {},
+        S.view === 'day' && h('button', { class: 'btn ghost sm', style: 'margin:-6px 0 8px -9px', onclick: () => go('journal') }, '← Journal'),
+        h('h1', {}, isToday ? 'Today' : prettyDay(day, { weekday: 'long', month: 'short', day: 'numeric' })),
         h('div', { class: 'sub' }, prettyDay(day))),
       h('div', { class: 'datebar' },
         h('button', { class: 'btn', title: 'Previous day', onclick: () => go('day', { day: addDays(day, -1) }) }, '‹'),
@@ -235,14 +239,16 @@
         !isToday && h('button', { class: 'btn', onclick: () => go('today') }, 'Today')));
 
     // Goals
-    const addInput = h('input', { class: 'input', placeholder: 'Add a goal for this day and press Enter' });
-    addInput.onkeydown = async (e) => {
-      if (e.key !== 'Enter' || !addInput.value.trim()) return;
-      const lines = addInput.value.split('\n').map((s) => s.trim()).filter(Boolean);
-      addInput.value = '';
-      try { await db.addGoals(day, lines, goals.length); await render(); document.querySelector('.goals-add')?.focus(); } catch (err) { fail(err); }
-    };
-    addInput.classList.add('goals-add');
+    const addInput = h('textarea', { class: 'input task-input goals-add', rows: 1, placeholder: 'Add a task and press Enter (Shift+Enter for a new line)' });
+    autoGrow(addInput);
+    addInput.addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter' || e.shiftKey) return;
+      e.preventDefault();
+      const text = addInput.value.trim();
+      if (!text) return;
+      addInput.value = ''; addInput.style.height = '';
+      try { await db.addGoals(day, [text], goals.length); await render(); document.querySelector('.goals-add')?.focus(); } catch (err) { fail(err); }
+    });
     const goalsCard = h('section', { class: 'card' },
       h('div', { class: 'card-head' },
         h('h2', {}, 'What I want to accomplish'),
@@ -279,12 +285,107 @@
   }
 
   function editGoal(g) {
-    const inp = h('input', { class: 'input', value: g.text });
-    openModal('Edit goal', inp, [
-      ['Cancel', null],
-      ['Save', async () => { if (inp.value.trim()) await db.updGoal(g.id, { text: inp.value.trim() }); render(); }, 'primary']
+    const inp = h('textarea', { class: 'input task-input', rows: 1, value: g.text });
+    autoGrow(inp);
+    const save = async () => { if (inp.value.trim()) await db.updGoal(g.id, { text: inp.value.trim() }); render(); };
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) { e.preventDefault(); save().then(() => activeClose?.(), fail); }
+    });
+    openModal('Edit task', inp, [['Cancel', null], ['Save', save, 'primary']], { subtitle: 'Enter to save · Shift+Enter for a new line' });
+    setTimeout(() => { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }, 0);
+  }
+
+  // Textarea that grows with its content.
+  function autoGrow(ta) {
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
+    ta.addEventListener('input', fit);
+    requestAnimationFrame(fit);
+    return fit;
+  }
+
+  // Task-by-task composer: Enter confirms a task and moves to the next,
+  // Shift+Enter adds a line inside the task, Ctrl+Enter is handled by the modal (save all).
+  function taskComposer() {
+    const list = h('div', { class: 'composer' });
+    const rows = () => [...list.querySelectorAll('textarea')];
+    const renumber = () => rows().forEach((ta, i) => (ta.parentElement.querySelector('.num').textContent = i + 1 + '.'));
+    const focusEnd = (ta) => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); };
+
+    function addRow(text = '', afterRow = null) {
+      const ta = h('textarea', { class: 'input task-input', rows: 1, placeholder: 'What do you want to get done?', value: text });
+      const row = h('div', { class: 'compose-row' + (text ? ' ok' : '') }, h('span', { class: 'num' }), ta);
+      afterRow ? afterRow.after(row) : list.append(row);
+      autoGrow(ta);
+      ta.addEventListener('keydown', (e) => {
+        const all = rows(), i = all.indexOf(ta);
+        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+          e.preventDefault();
+          if (!ta.value.trim()) return;
+          row.classList.add('ok');
+          const next = all[i + 1];
+          if (next) focusEnd(next);
+          else addRow('', row).focus();
+        } else if (e.key === 'Backspace' && !ta.value && all.length > 1) {
+          e.preventDefault();
+          row.remove(); renumber();
+          focusEnd(all[i - 1] || all[i + 1]);
+        } else if (e.key === 'ArrowUp' && ta.selectionStart === 0 && ta.selectionEnd === 0 && i > 0) {
+          e.preventDefault(); focusEnd(all[i - 1]);
+        } else if (e.key === 'ArrowDown' && ta.selectionStart === ta.value.length && all[i + 1]) {
+          e.preventDefault(); focusEnd(all[i + 1]);
+        }
+      });
+      ta.addEventListener('input', () => { if (!ta.value.trim()) row.classList.remove('ok'); });
+      renumber();
+      return ta;
+    }
+    addRow();
+
+    return {
+      el: list,
+      focus: () => focusEnd(rows().at(-1)),
+      values: () => rows().map((ta) => ta.value.trim()).filter(Boolean),
+      // Add text as its own task, keeping an empty task at the end to type into.
+      add(text) {
+        const last = rows().at(-1);
+        if (!last.value.trim()) { last.value = text; last.dispatchEvent(new Event('input')); last.parentElement.classList.add('ok'); addRow('', last.parentElement).focus(); }
+        else { const ta = addRow(text, last.parentElement); addRow('', ta.parentElement).focus(); }
+      }
+    };
+  }
+
+  // ---------- Journal (history of days) ----------
+  async function viewJournal() {
+    const since = addDays(ymd(), -365);
+    const [goals, entries, notes] = await Promise.all([
+      q(sb.from('goals').select('day,text,completed').gte('day', since).order('position')),
+      q(sb.from('day_entries').select('day,done_notes').gte('day', since)),
+      q(sb.from('notes').select('day,title').gte('day', since))
     ]);
-    setTimeout(() => inp.focus(), 0);
+    const days = new Map();
+    const get = (d) => days.get(d) || days.set(d, { goals: [], done: '', notes: 0 }).get(d);
+    goals.forEach((g) => get(g.day).goals.push(g));
+    entries.forEach((e) => { if (e.done_notes.trim()) get(e.day).done = e.done_notes; });
+    notes.forEach((n) => get(n.day).notes++);
+    const sorted = [...days.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+
+    const jump = h('input', { class: 'input', type: 'date', onchange: (e) => e.target.value && go('day', { day: e.target.value }) });
+    return h('div', {},
+      h('div', { class: 'head' },
+        h('div', {}, h('h1', {}, 'Journal'), h('div', { class: 'sub' }, 'Past days: what you planned, did and learned.')),
+        h('label', { class: 'row small muted' }, 'Jump to', jump)),
+      sorted.length === 0 && h('div', { class: 'card empty' }, 'No days recorded yet. Start with Today.'),
+      sorted.map(([day, d]) => {
+        const doneCount = d.goals.filter((g) => g.completed).length;
+        return h('div', { class: 'jday', onclick: () => go('day', { day }) },
+          h('div', { class: 'row' },
+            h('strong', { class: 'grow' }, day === ymd() ? 'Today' : prettyDay(day, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })),
+            d.goals.length > 0 && h('span', { class: 'badge' }, `${doneCount}/${d.goals.length} tasks`),
+            d.notes > 0 && h('span', { class: 'badge' }, `${d.notes} note${d.notes === 1 ? '' : 's'}`)),
+          d.goals.length > 0 && h('div', { class: 'jgoals' }, d.goals.slice(0, 6).map((g) =>
+            h('span', { class: g.completed ? 'ok' : '' }, (g.completed ? '✓ ' : '○ ') + g.text.split('\n')[0]))),
+          d.done && h('div', { class: 'snippet' }, d.done.length > 240 ? d.done.slice(0, 240) + '…' : d.done));
+      }));
   }
 
   // ---------- Notes ----------
@@ -564,31 +665,31 @@
     promptOpen = true;
     try {
       const [goals, tasks] = await Promise.all([db.goals(day), db.tasks()]);
-      const ta = h('textarea', { class: 'input', rows: 7, placeholder: 'One goal per line' });
+      const composer = taskComposer();
       const active = tasks.filter((t) => t.status !== 'done');
       const parent = Object.fromEntries(tasks.map((t) => [t.id, t]));
-      const addLine = (txt) => { ta.value = (ta.value.trim() ? ta.value.replace(/\s*$/, '\n') : '') + txt; ta.focus(); };
       const body = h('div', {},
         goals.length > 0 && h('div', { style: 'margin-bottom:12px' },
           h('div', { class: 'small muted', style: 'margin-bottom:4px' }, 'Already planned:'),
-          goals.map((g) => h('div', { class: 'small' }, (g.completed ? '✓ ' : '• ') + g.text))),
-        ta,
+          goals.map((g) => h('div', { class: 'small', style: 'white-space:pre-wrap' }, (g.completed ? '✓ ' : '• ') + g.text))),
+        composer.el,
+        h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Enter: next task · Shift+Enter: new line · Ctrl+Enter: save all'),
         active.length > 0 && h('div', { style: 'margin-top:12px' },
           h('div', { class: 'small muted' }, 'Pull from long-term goals:'),
           h('div', { class: 'chips' }, active.slice(0, 20).map((t) => {
             const label = t.parent_id && parent[t.parent_id] ? `${parent[t.parent_id].title}: ${t.title}` : t.title;
-            return h('button', { class: 'chip', onclick: () => addLine(label) }, '+ ' + label);
+            return h('button', { class: 'chip', onclick: () => composer.add(label) }, '+ ' + label);
           }))));
       openModal(day === ymd() ? 'Good morning! What do you want to accomplish today?' : `Goals for ${prettyDay(day)}`, body, [
         ['Later (30 min)', () => { snooze('m'); }],
         ['Save goals', async () => {
-          const lines = ta.value.split('\n').map((s) => s.replace(/^[-*•]\s*/, '').trim()).filter(Boolean);
-          if (lines.length) await db.addGoals(day, lines, goals.length);
+          const tasks = composer.values();
+          if (tasks.length) await db.addGoals(day, tasks, goals.length);
           markDone('m');
           render();
         }, 'primary']
-      ], { subtitle: 'Ctrl+Enter to save' });
-      setTimeout(() => ta.focus(), 0);
+      ]);
+      setTimeout(() => composer.focus(), 0);
     } catch (e) { fail(e); } finally {
       // promptOpen resets when the modal closes
       const obs = new MutationObserver(() => { if (!$modal.childElementCount) { promptOpen = false; obs.disconnect(); } });
@@ -694,7 +795,7 @@
   // ---------- Keyboard shortcuts ----------
   document.addEventListener('keydown', (e) => {
     if (!S.user || $modal.childElementCount || !(e.ctrlKey || e.metaKey)) return;
-    const map = { '1': 'today', '2': 'day', '3': 'tasks', '4': 'notes', f: 'search', k: 'search' };
+    const map = { '1': 'today', '2': 'journal', '3': 'tasks', '4': 'notes', f: 'search', k: 'search' };
     const v = map[e.key.toLowerCase()];
     if (v) { e.preventDefault(); go(v); }
     if (e.key.toLowerCase() === 'n') { e.preventDefault(); noteEditor({ day: S.view === 'day' || S.view === 'today' ? S.day : ymd() }); }
