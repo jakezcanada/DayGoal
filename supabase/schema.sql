@@ -51,7 +51,7 @@ create index if not exists notes_user_day on public.notes (user_id, day);
 
 create table if not exists public.user_settings (
   user_id uuid primary key default auth.uid() references auth.users on delete cascade,
-  morning_time text not null default '08:00',
+  morning_time text not null default '06:00',
   evening_time text not null default '21:00',
   updated_at timestamptz not null default now()
 );

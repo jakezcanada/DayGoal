@@ -69,7 +69,7 @@
     user: null,
     view: 'today',
     day: ymd(),
-    settings: { morning_time: '08:00', evening_time: '21:00' },
+    settings: { morning_time: '06:00', evening_time: '21:00' },
     taskFilter: lsGet('taskFilter') || 'active',
     search: { text: '', cs: false },
     channel: null
@@ -499,7 +499,7 @@
 
     const save = async () => {
       try {
-        S.settings = { morning_time: morning.value || '08:00', evening_time: evening.value || '21:00' };
+        S.settings = { morning_time: morning.value || '06:00', evening_time: evening.value || '21:00' };
         await db.saveSettings(S.settings);
         toast('Reminder times saved (synced to all devices)');
       } catch (e) { fail(e); }
