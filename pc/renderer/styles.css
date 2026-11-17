@@ -152,3 +152,42 @@ textarea.input.task-input { min-height: 0; resize: none; overflow: hidden; line-
 .jday:hover { border-color: #3a4150; }
 .jgoals { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13px; }
 .jgoals .ok { color: var(--muted); text-decoration: line-through; }
+
+/* ---------- Stats ---------- */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.stat { background: var(--panel-2); border-radius: 9px; padding: 12px 14px; }
+.stat-label { font-size: 12px; color: var(--muted); }
+.stat-value { font-size: 26px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.stat-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.delta.up { color: var(--good); }
+.delta.down { color: var(--bad); }
+
+.bars { display: grid; grid-template-columns: 34px 1fr; grid-template-rows: var(--h) auto; column-gap: 8px; margin-top: 6px; }
+.bars-y { position: relative; font-size: 11px; color: var(--muted); }
+.bars-y span { position: absolute; right: 0; transform: translateY(50%); font-variant-numeric: tabular-nums; }
+.bars-plot { position: relative; display: flex; align-items: stretch; gap: 2px; }
+.bars-plot .gl { position: absolute; left: 0; right: 0; border-top: 1px solid var(--line); pointer-events: none; }
+.bar-col { flex: 1; min-width: 0; display: flex; align-items: flex-end; justify-content: center; position: relative; outline: none; border-radius: 4px; }
+.bar-col:hover, .bar-col:focus-visible { background: rgba(255,255,255,.05); }
+.bar-col[tabindex]:focus-visible { box-shadow: 0 0 0 1px var(--accent); }
+.bar-col i { position: relative; display: block; width: 100%; max-width: 34px; background: var(--good); border-radius: 4px 4px 0 0; }
+.bar-col.none::after { content: ''; position: absolute; bottom: 0; left: 30%; right: 30%; height: 2px; border-radius: 2px; background: var(--muted); opacity: .35; }
+.bars-x { grid-column: 2; display: flex; gap: 2px; font-size: 11px; color: var(--muted); margin-top: 6px; }
+.bars-x span { flex: 1; min-width: 0; text-align: center; white-space: nowrap; overflow: visible; }
+
+.heat-wrap { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; }
+.heat-days { display: grid; grid-template-rows: repeat(7, 13px); gap: 3px; font-size: 10px; color: var(--muted); line-height: 13px; }
+.heat { display: grid; grid-template-rows: repeat(7, 13px); grid-auto-flow: column; grid-auto-columns: 13px; gap: 3px; }
+.heat i, .heat-legend i { display: block; width: 13px; height: 13px; border-radius: 3px; background: var(--panel-2); }
+.heat i { cursor: pointer; outline: none; }
+.heat i:hover, .heat i:focus-visible { box-shadow: 0 0 0 1.5px var(--text); }
+.heat i.future { background: transparent; cursor: default; box-shadow: none; }
+.heat .l1, .heat-legend .l1 { background: #253d36; }
+.heat .l2, .heat-legend .l2 { background: #33604b; }
+.heat .l3, .heat-legend .l3 { background: #448c65; }
+.heat .l4, .heat-legend .l4 { background: var(--good); }
+.heat-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+.heat-legend .l0 { margin-right: 2px; }
+
+.tip { position: fixed; z-index: 70; pointer-events: none; background: var(--panel-2); border: 1px solid #3a4150; border-radius: 7px; padding: 6px 9px; font-size: 12px; line-height: 1.45; white-space: pre-line; opacity: 0; transition: opacity .1s; box-shadow: 0 6px 20px rgba(0,0,0,.4); max-width: 260px; }
+.tip.show { opacity: 1; }

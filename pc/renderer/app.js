@@ -71,6 +71,7 @@
     day: ymd(),
     settings: { morning_time: '06:00', evening_time: '21:00' },
     taskFilter: lsGet('taskFilter') || 'active',
+    statsRange: lsGet('statsRange') || '30',
     search: { text: '', cs: false },
     channel: null
   };
@@ -164,6 +165,7 @@
     ['journal', 'Journal', 'Ctrl+2'],
     ['tasks', 'Long-term goals', 'Ctrl+3'],
     ['notes', 'Knowledge bank', 'Ctrl+4'],
+    ['stats', 'Stats', 'Ctrl+5'],
     ['search', 'Search', 'Ctrl+F'],
     ['settings', 'Settings', '']
   ];
@@ -197,7 +199,8 @@
   async function render() {
     if (!$main) return;
     const seq = ++renderSeq;
-    const views = { today: viewDay, day: viewDay, journal: viewJournal, tasks: viewTasks, notes: viewNotes, search: viewSearch, settings: viewSettings };
+    hideTip();
+    const views = { today: viewDay, day: viewDay, journal: viewJournal, tasks: viewTasks, notes: viewNotes, stats: viewStats, search: viewSearch, settings: viewSettings };
     try {
       const el = await views[S.view]();
       if (seq !== renderSeq) return; // a newer render started
@@ -517,6 +520,254 @@
     ], { ctrlEnter: true });
   }
 
+  // ---------- Stats ----------
+  const RANGES = [['7', '7 days'], ['30', '30 days'], ['90', '90 days'], ['365', 'Year'], ['all', 'All time']];
+  const pct = (v) => (v == null ? '—' : Math.round(v * 100) + '%');
+  const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
+  const weekStart = (d) => addDays(d, -((parseYmd(d).getDay() + 6) % 7)); // Monday
+  const words = (t) => (t.trim() ? t.trim().split(/\s+/).length : 0);
+
+  // Supabase caps a select at 1000 rows; page through everything.
+  async function fetchAll(table, cols) {
+    const out = [];
+    for (let from = 0; ; from += 1000) {
+      const rows = await q(sb.from(table).select(cols).order('id').range(from, from + 999));
+      out.push(...rows);
+      if (rows.length < 1000) return out;
+    }
+  }
+
+  // Hover/focus tooltip for any element with data-tip.
+  const $tip = h('div', { class: 'tip' });
+  document.body.append($tip);
+  function hideTip() { $tip.classList.remove('show'); }
+  function showTipFor(e) {
+    const el = e.target.closest?.('[data-tip]');
+    if (!el) return hideTip();
+    $tip.textContent = el.dataset.tip;
+    $tip.classList.add('show');
+    const r = el.getBoundingClientRect(), t = $tip.getBoundingClientRect();
+    const x = Math.max(8, Math.min(r.left + r.width / 2 - t.width / 2, innerWidth - t.width - 8));
+    let y = r.top - t.height - 8;
+    if (y < 8) y = r.bottom + 8;
+    $tip.style.left = x + 'px'; $tip.style.top = y + 'px';
+  }
+  document.addEventListener('mouseover', showTipFor);
+  document.addEventListener('focusin', showTipFor);
+  document.addEventListener('scroll', hideTip, true);
+
+  const tile = (label, value, sub, extra) => h('div', { class: 'stat' },
+    h('div', { class: 'stat-label' }, label),
+    h('div', { class: 'stat-value' }, value),
+    sub && h('div', { class: 'stat-sub' }, sub), extra);
+
+  // Single-series bar chart of rates (0..1); value null = nothing planned.
+  function barChart(items, height = 140) {
+    return h('div', { class: 'bars', style: `--h:${height}px` },
+      h('div', { class: 'bars-y' }, [0, 50, 100].map((v) => h('span', { style: `bottom:${v}%` }, v + '%'))),
+      h('div', { class: 'bars-plot' },
+        [0, 50, 100].map((v) => h('div', { class: 'gl', style: `bottom:${v}%` })),
+        items.map((it) => h('div', { class: 'bar-col' + (it.value == null ? ' none' : ''), 'data-tip': it.tip, tabindex: 0, onclick: it.onclick },
+          it.value != null && h('i', { style: `height:${Math.max(it.value * 100, 1.5)}%` })))),
+      h('div', { class: 'bars-x' }, items.map((it) => h('span', {}, it.short || ''))));
+  }
+
+  async function viewStats() {
+    const [goals, entries, notes, tasks] = await Promise.all([
+      fetchAll('goals', 'day,completed'),
+      fetchAll('day_entries', 'day,done_notes'),
+      fetchAll('notes', 'day,tags'),
+      fetchAll('tasks', 'parent_id,status,due_date,created_at,completed_at')
+    ]);
+    const today = ymd();
+    const dayOf = (ts) => (ts ? ymd(new Date(ts)) : null);
+
+    const byDay = new Map(); // day -> { planned, done }
+    for (const g of goals) {
+      if (g.day > today) continue;
+      const d = byDay.get(g.day) || byDay.set(g.day, { planned: 0, done: 0 }).get(g.day);
+      d.planned++; if (g.completed) d.done++;
+    }
+    const logs = new Map(entries.filter((e) => e.day <= today && e.done_notes.trim()).map((e) => [e.day, e.done_notes]));
+    const first = [...byDay.keys(), ...logs.keys(), ...notes.map((n) => n.day), ...tasks.map((t) => dayOf(t.created_at))]
+      .filter((d) => d && d <= today).sort()[0];
+
+    const head = h('div', { class: 'head' },
+      h('div', {}, h('h1', {}, 'Stats'), h('div', { class: 'sub' }, 'How your days are actually going.')),
+      h('div', { class: 'tabs' }, RANGES.map(([id, label]) => h('button', {
+        class: S.statsRange === id ? 'on' : '', onclick: () => { S.statsRange = id; lsSet('statsRange', id); render(); }
+      }, label))));
+    if (!first) return h('div', {}, head, h('div', { class: 'card empty' }, 'No data yet. Plan a day and check things off to see stats here.'));
+
+    const n = S.statsRange === 'all' ? null : Number(S.statsRange);
+    const start = n ? addDays(today, -(n - 1)) : first;
+    const from = start > first ? start : first; // don't count days before you started using DayGoal
+    const nDays = daysBetween(from, today) + 1;
+    const inRange = (d, a = from, b = today) => d && d >= a && d <= b;
+    const rangeName = n ? `last ${n} days` : 'all time';
+
+    // --- Daily goals ---
+    const period = (a, b) => {
+      let planned = 0, done = 0, days = 0, perfect = 0, sum = 0;
+      for (const [d, v] of byDay) if (inRange(d, a, b)) {
+        planned += v.planned; done += v.done; days++; sum += v.done / v.planned;
+        if (v.done === v.planned) perfect++;
+      }
+      return { planned, done, days, perfect, rate: planned ? done / planned : null, avgDay: days ? sum / days : null };
+    };
+    const cur = period(from, today);
+    const prev = n ? period(addDays(start, -n), addDays(start, -1)) : null;
+    let delta = null;
+    if (prev?.rate != null && cur.rate != null) {
+      const diff = Math.round((cur.rate - prev.rate) * 100);
+      delta = h('div', { class: 'stat-sub delta ' + (diff > 0 ? 'up' : diff < 0 ? 'down' : '') },
+        diff === 0 ? `Same as previous ${n} days` : `${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)} pts vs previous ${n} days`);
+    }
+
+    const streaks = (has) => {
+      let best = 0, run = 0;
+      for (let d = first; d <= today; d = addDays(d, 1)) { run = has(d) ? run + 1 : 0; best = Math.max(best, run); }
+      let current = 0, d = has(today) ? today : addDays(today, -1); // today still counts as in progress
+      while (has(d)) { current++; d = addDays(d, -1); }
+      return { current, best };
+    };
+    const streakTile = (label, s, what) => tile(label, `${s.current} day${s.current === 1 ? '' : 's'}`, `Best: ${s.best} · ${what}`);
+    const winS = streaks((d) => byDay.get(d)?.done > 0);
+    const planS = streaks((d) => byDay.has(d));
+    const logS = streaks((d) => logs.has(d));
+
+    // --- Trend (bucket size follows the range) ---
+    const unit = nDays <= 31 ? 'day' : nDays <= 120 ? 'week' : 'month';
+    const keyOf = (d) => (unit === 'day' ? d : unit === 'week' ? weekStart(d) : d.slice(0, 7));
+    const buckets = new Map();
+    for (let d = from; d <= today; d = addDays(d, 1)) {
+      const k = keyOf(d), v = byDay.get(d);
+      const b = buckets.get(k) || buckets.set(k, { planned: 0, done: 0 }).get(k);
+      if (v) { b.planned += v.planned; b.done += v.done; }
+    }
+    const multiYear = from.slice(0, 4) !== today.slice(0, 4);
+    const monthDate = (k) => parseYmd(k + '-01');
+    const longLabel = (k) => unit === 'day' ? prettyDay(k, { weekday: 'short', month: 'short', day: 'numeric' })
+      : unit === 'week' ? 'Week of ' + prettyDay(k, { month: 'short', day: 'numeric' })
+      : monthDate(k).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const shortLabel = (k) => unit === 'month' ? monthDate(k).toLocaleDateString(undefined, { month: 'short', ...(multiYear ? { year: '2-digit' } : {}) })
+      : nDays <= 7 ? prettyDay(k, { weekday: 'short' }) : prettyDay(k, { month: 'numeric', day: 'numeric' });
+    const keys = [...buckets.keys()];
+    const step = Math.ceil(keys.length / 10);
+    const trend = keys.map((k, i) => {
+      const b = buckets.get(k);
+      return {
+        value: b.planned ? b.done / b.planned : null,
+        short: (keys.length - 1 - i) % step === 0 ? shortLabel(k) : '',
+        tip: `${longLabel(k)}\n${b.planned ? `${b.done}/${b.planned} done · ${pct(b.done / b.planned)}` : 'Nothing planned'}`,
+        onclick: unit === 'day' ? () => go('day', { day: k }) : null
+      };
+    });
+
+    // --- Weekday ---
+    const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const wd = WD.map(() => ({ planned: 0, done: 0, days: 0 }));
+    for (const [d, v] of byDay) if (inRange(d)) {
+      const w = wd[(parseYmd(d).getDay() + 6) % 7];
+      w.planned += v.planned; w.done += v.done; w.days++;
+    }
+    const wdItems = wd.map((w, i) => ({
+      value: w.planned ? w.done / w.planned : null, short: WD[i],
+      tip: `${WD[i]}s\n${w.planned ? `${w.done}/${w.planned} done · ${pct(w.done / w.planned)} over ${w.days} day${w.days === 1 ? '' : 's'}` : 'Nothing planned'}`
+    }));
+    const ranked = wd.map((w, i) => [i, w.planned ? w.done / w.planned : -1]).filter((x) => x[1] >= 0).sort((a, b) => b[1] - a[1]);
+
+    // --- Heatmap: last 26 weeks, always ---
+    const hmStart = addDays(weekStart(today), -25 * 7);
+    const cells = [];
+    for (let i = 0; i < 26 * 7; i++) {
+      const d = addDays(hmStart, i);
+      if (d > today) { cells.push(h('i', { class: 'future' })); continue; }
+      const v = byDay.get(d), r = v ? v.done / v.planned : null;
+      const lvl = r == null ? 0 : r === 1 ? 4 : r >= 0.5 ? 3 : r > 0 ? 2 : 1;
+      cells.push(h('i', {
+        class: 'l' + lvl, tabindex: 0, onclick: () => go('day', { day: d }),
+        'data-tip': `${prettyDay(d, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}\n${v ? `${v.done}/${v.planned} done · ${pct(r)}` : 'Nothing planned'}${logs.has(d) ? '\nEvening logged' : ''}`
+      }));
+    }
+
+    // --- Long-term goals ---
+    const top = tasks.filter((t) => !t.parent_id);
+    const active = top.filter((t) => t.status !== 'done');
+    const finished = top.filter((t) => t.status === 'done' && inRange(dayOf(t.completed_at)));
+    const withDue = finished.filter((t) => t.due_date);
+    const onTime = withDue.filter((t) => dayOf(t.completed_at) <= t.due_date).length;
+    const overdue = active.filter((t) => t.due_date && t.due_date < today).length;
+    const stepsDone = tasks.filter((t) => t.parent_id && t.status === 'done' && inRange(dayOf(t.completed_at))).length;
+    const avgFinish = finished.length
+      ? finished.reduce((s, t) => s + daysBetween(dayOf(t.created_at), dayOf(t.completed_at)), 0) / finished.length : null;
+
+    // --- Journal & knowledge ---
+    const loggedDays = [...logs.keys()].filter((d) => inRange(d));
+    const wordCount = loggedDays.reduce((s, d) => s + words(logs.get(d)), 0);
+    const rangeNotes = notes.filter((x) => inRange(x.day));
+    const tagCount = new Map();
+    rangeNotes.forEach((x) => (x.tags || []).forEach((t) => tagCount.set(t, (tagCount.get(t) || 0) + 1)));
+    const topTags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+    const avg = (a, b) => (b ? (a / b).toFixed(1) : '—');
+    return h('div', {}, head,
+      from > start && h('div', { class: 'muted small', style: 'margin:-12px 0 14px' }, `Counting from your first day, ${prettyDay(from, { month: 'short', day: 'numeric', year: 'numeric' })}.`),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Daily goals'), h('span', { class: 'muted small' }, rangeName)),
+        h('div', { class: 'stats-grid' },
+          tile('Completion rate', pct(cur.rate), `${cur.done} of ${cur.planned} tasks done`, delta),
+          tile('Average day', pct(cur.avgDay), 'mean % done per planned day'),
+          tile('Perfect days', cur.perfect, `${pct(cur.days ? cur.perfect / cur.days : null)} of planned days hit 100%`),
+          tile('Days planned', `${cur.days}/${nDays}`, `${pct(cur.days / nDays)} planning consistency`),
+          tile('Tasks per day', avg(cur.planned, cur.days), `${avg(cur.done, cur.days)} completed on average`))),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Streaks'), h('span', { class: 'muted small' }, 'all time')),
+        h('div', { class: 'stats-grid' },
+          streakTile('Win streak', winS, 'days with at least 1 task done'),
+          streakTile('Planning streak', planS, 'days with goals set'),
+          streakTile('Journal streak', logS, 'evenings logged'))),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Completion trend'), h('span', { class: 'muted small' }, `% of tasks done, by ${unit}`)),
+        barChart(trend)),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'By weekday'),
+          ranked.length > 1 && h('span', { class: 'muted small' }, `Best: ${WD[ranked[0][0]]} (${pct(ranked[0][1])}) · Toughest: ${WD[ranked.at(-1)[0]]} (${pct(ranked.at(-1)[1])})`)),
+        barChart(wdItems, 110)),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Last 26 weeks'), h('span', { class: 'muted small' }, 'Click a day to open it')),
+        h('div', { class: 'heat-wrap' },
+          h('div', { class: 'heat-days' }, WD.map((d, i) => h('span', {}, i % 2 === 0 ? d : ''))),
+          h('div', { class: 'heat' }, cells)),
+        h('div', { class: 'heat-legend' },
+          h('i', { class: 'l0' }), 'Nothing planned', h('span', { style: 'width:14px' }),
+          '0%', h('i', { class: 'l1' }), h('i', { class: 'l2' }), h('i', { class: 'l3' }), h('i', { class: 'l4' }), '100%')),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Long-term goals'), h('span', { class: 'muted small' }, rangeName)),
+        h('div', { class: 'stats-grid' },
+          tile('Completed', finished.length, `${stepsDone} step${stepsDone === 1 ? '' : 's'} checked off`),
+          tile('On time', withDue.length ? pct(onTime / withDue.length) : '—', withDue.length ? `${onTime} of ${withDue.length} with a due date` : 'no due-dated goals finished'),
+          tile('Active', active.length, `${active.filter((t) => t.status === 'doing').length} in progress`),
+          tile('Overdue', overdue, 'active goals past due'),
+          tile('Time to finish', avgFinish == null ? '—' : `${Math.round(avgFinish)}d`, 'average, created → done'))),
+
+      h('section', { class: 'card' },
+        h('div', { class: 'card-head' }, h('h2', {}, 'Journal & knowledge'), h('span', { class: 'muted small' }, rangeName)),
+        h('div', { class: 'stats-grid' },
+          tile('Evenings logged', `${loggedDays.length}/${nDays}`, `${pct(loggedDays.length / nDays)} of days`),
+          tile('Words journaled', wordCount.toLocaleString(), `${avg(wordCount, loggedDays.length)} per logged day`),
+          tile('Notes added', rangeNotes.length, `${avg(rangeNotes.length, nDays / 7)} per week`)),
+        topTags.length > 0 && h('div', { style: 'margin-top:12px' },
+          h('span', { class: 'muted small' }, 'Top tags: '),
+          topTags.map(([t, c]) => h('span', { class: 'tag', onclick: () => { S.search.text = t; go('search'); } }, `#${t} · ${c}`)))));
+  }
+
   // ---------- Search (literal substring) ----------
   function highlight(text, needle, cs) {
     const out = [];
@@ -795,7 +1046,7 @@
   // ---------- Keyboard shortcuts ----------
   document.addEventListener('keydown', (e) => {
     if (!S.user || $modal.childElementCount || !(e.ctrlKey || e.metaKey)) return;
-    const map = { '1': 'today', '2': 'journal', '3': 'tasks', '4': 'notes', f: 'search', k: 'search' };
+    const map = { '1': 'today', '2': 'journal', '3': 'tasks', '4': 'notes', '5': 'stats', f: 'search', k: 'search' };
     const v = map[e.key.toLowerCase()];
     if (v) { e.preventDefault(); go(v); }
     if (e.key.toLowerCase() === 'n') { e.preventDefault(); noteEditor({ day: S.view === 'day' || S.view === 'today' ? S.day : ymd() }); }

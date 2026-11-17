@@ -24,7 +24,7 @@ supabase/  Database schema (run once)
 ## Behaviour
 - Closing the window hides to the tray; tray menu → Quit to exit. The installed app starts with Windows (toggle in Settings).
 - Morning/evening times are set in Settings and synced to all devices. If the PC was off at that time, you're prompted the next time the app runs that day. "Later" snoozes 30 min.
-- Shortcuts: `Ctrl+1..4` views, `Ctrl+F` search, `Ctrl+N` new note, `Ctrl+Enter` save in dialogs.
+- Shortcuts: `Ctrl+1..5` views, `Ctrl+F` search, `Ctrl+N` new note, `Ctrl+Enter` save in dialogs.
 
 ## Notes
 - Supabase free projects pause after ~1 week of no activity (daily use keeps it awake; resume from the dashboard if it happens).
