@@ -431,7 +431,8 @@
         const text = inp.value.trim();
         if (!text || text === r.text) return;
         await db.updRecurring(r.id, { text });
-        await q(sb.from('goals').update({ text }).match(todaysCopy(r.id)));
+        // Rename every day's copy (past and today, done or not) so history reads consistently.
+        await q(sb.from('goals').update({ text }).eq('recurring_id', r.id));
       });
       inp.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); }
@@ -482,7 +483,7 @@
 
     try { await draw(); } catch (e) { return fail(e); }
     openModal('Repeating goals', body, [['Done', null, 'primary']], {
-      subtitle: 'Added to your list automatically each morning. Click a name to rename it, uncheck to pause.', ctrlEnter: false, enterSubmit: false
+      subtitle: 'Added to your list automatically each morning. Click a name to rename it (past days too), uncheck to pause.', ctrlEnter: false, enterSubmit: false
     });
     setTimeout(() => body.querySelector('.rec-add input')?.focus(), 0);
   }
