@@ -454,7 +454,7 @@
       const drawPicker = () => picker.replaceChildren(weekdayPicker(newDays, (d) => { newDays = d; drawPicker(); }));
       drawPicker();
 
-      body.replaceChildren(
+      body.replaceChildren(h('div', {},
         list.length === 0 && h('div', { class: 'empty' }, 'No repeating goals yet. Add habits you want on your list every morning.'),
         list.map((r) => h('div', { class: 'rec-row' + (r.active ? '' : ' paused'), 'data-id': r.id },
           h('input', { type: 'checkbox', class: 'check', checked: r.active, title: r.active ? 'On (uncheck to pause)' : 'Paused',
@@ -467,7 +467,7 @@
             await q(sb.from('goals').delete().match(todaysCopy(r.id)));
             await db.delRecurring(r.id);
           }) }, '✕'))),
-        h('div', { class: 'rec-add' }, input, picker, h('button', { class: 'btn primary', onclick: add }, 'Add')));
+        h('div', { class: 'rec-add' }, input, picker, h('button', { class: 'btn primary', onclick: add }, 'Add'))));
       input.focus();
     }
 
@@ -927,7 +927,7 @@
         if (input.value !== text) return;
         results.replaceChildren(
           h('div', { class: 'muted small', style: 'margin:4px 0 10px' }, `${rows.length} result${rows.length === 1 ? '' : 's'}`),
-          rows.map((r) => {
+          ...rows.map((r) => {
             const body = r.item_body || '';
             return h('div', { class: 'result', onclick: () => openResult(r) },
               h('div', { class: 'row' },
