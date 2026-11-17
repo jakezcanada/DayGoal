@@ -191,3 +191,16 @@ textarea.input.task-input { min-height: 0; resize: none; overflow: hidden; line-
 
 .tip { position: fixed; z-index: 70; pointer-events: none; background: var(--panel-2); border: 1px solid #3a4150; border-radius: 7px; padding: 6px 9px; font-size: 12px; line-height: 1.45; white-space: pre-line; opacity: 0; transition: opacity .1s; box-shadow: 0 6px 20px rgba(0,0,0,.4); max-width: 260px; }
 .tip.show { opacity: 1; }
+
+/* ---------- Repeating goals ---------- */
+.goal .rep { color: var(--muted); font-size: 12px; }
+.rec-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.rec-row .t { cursor: text; white-space: pre-wrap; }
+.rec-row.paused .t { color: var(--muted); }
+.rec-row .icon-btn { opacity: .5; }
+.rec-row:hover .icon-btn { opacity: 1; }
+.rec-add { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.wd-row { display: flex; gap: 3px; flex: none; }
+.wd { width: 24px; height: 24px; padding: 0; border-radius: 6px; border: 1px solid var(--line); background: none; color: var(--muted); font-size: 11px; cursor: pointer; }
+.wd:hover { color: var(--text); }
+.wd.on { background: rgba(242,181,68,.15); color: var(--accent); border-color: rgba(242,181,68,.45); }

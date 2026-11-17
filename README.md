@@ -24,6 +24,7 @@ supabase/  Database schema (run once)
 ## Behaviour
 - Closing the window hides to the tray; tray menu → Quit to exit. The installed app starts with Windows (toggle in Settings).
 - Morning/evening times are set in Settings and synced to all devices. If the PC was off at that time, you're prompted the next time the app runs that day. "Later" snoozes 30 min.
+- Repeating goals (Today → ↻ Repeating) are added to your list automatically each morning, on the weekdays you pick. Deleting today's copy doesn't bring it back until tomorrow.
 - Shortcuts: `Ctrl+1..5` views, `Ctrl+F` search, `Ctrl+N` new note, `Ctrl+Enter` save in dialogs.
 
 ## Notes

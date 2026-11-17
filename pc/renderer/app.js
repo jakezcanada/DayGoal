@@ -84,6 +84,11 @@
     updGoal: (id, patch) => q(sb.from('goals').update(patch).eq('id', id)),
     delGoal: (id) => q(sb.from('goals').delete().eq('id', id)),
 
+    recurring: () => q(sb.from('recurring_goals').select('*').order('position').order('created_at')),
+    addRecurring: (r) => q(sb.from('recurring_goals').insert({ user_id: S.user.id, ...r })),
+    updRecurring: (id, patch) => q(sb.from('recurring_goals').update(patch).eq('id', id)),
+    delRecurring: (id) => q(sb.from('recurring_goals').delete().eq('id', id)),
+
     entry: async (day) => (await q(sb.from('day_entries').select('*').eq('day', day).limit(1)))[0] || null,
     saveEntry: (day, done_notes) =>
       q(sb.from('day_entries').upsert({ user_id: S.user.id, day, done_notes }, { onConflict: 'user_id,day' })),
@@ -226,6 +231,7 @@
   async function viewDay() {
     const day = S.day;
     const isToday = day === ymd();
+    if (isToday) await addRecurringForToday();
     const [goals, entry, notes] = await Promise.all([db.goals(day), db.entry(day), db.notesForDay(day)]);
     const done = goals.filter((g) => g.completed).length;
 
@@ -257,12 +263,14 @@
         h('h2', {}, 'What I want to accomplish'),
         h('div', { class: 'row' },
           goals.length > 0 && h('span', { class: 'muted small' }, `${done}/${goals.length} done`),
+          h('button', { class: 'btn sm', title: 'Goals that come back every morning', onclick: recurringManager }, '↻ Repeating'),
           h('button', { class: 'btn sm', onclick: () => morningPrompt(day) }, 'Plan'))),
       goals.length > 0 && h('div', { class: 'progress', style: 'margin-bottom:10px' }, h('i', { style: `width:${(done / goals.length) * 100}%` })),
       goals.length === 0 && h('div', { class: 'empty' }, 'No goals set yet.'),
       goals.map((g) => h('div', { class: 'goal' + (g.completed ? ' done' : '') },
         h('input', { type: 'checkbox', class: 'check', checked: g.completed, onchange: async (e) => { try { await db.updGoal(g.id, { completed: e.target.checked }); render(); } catch (err) { fail(err); } } }),
-        h('span', { class: 't', title: 'Double-click to edit', ondblclick: () => editGoal(g) }, g.text),
+        h('span', { class: 't', title: 'Double-click to edit', ondblclick: () => editGoal(g) }, g.text,
+          g.recurring_id && h('span', { class: 'rep', title: 'Repeating goal' }, ' ↻')),
         h('button', { class: 'icon-btn', title: 'Delete', onclick: async () => { try { await db.delGoal(g.id); render(); } catch (err) { fail(err); } } }, '✕'))),
       h('div', { class: 'add-row' }, addInput));
 
@@ -294,7 +302,9 @@
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) { e.preventDefault(); save().then(() => activeClose?.(), fail); }
     });
-    openModal('Edit task', inp, [['Cancel', null], ['Save', save, 'primary']], { subtitle: 'Enter to save · Shift+Enter for a new line' });
+    openModal('Edit task', inp, [['Cancel', null], ['Save', save, 'primary']], {
+      subtitle: 'Enter to save · Shift+Enter for a new line' + (g.recurring_id ? ' · Changes this day only (edit the repeating goal under ↻ Repeating)' : '')
+    });
     setTimeout(() => { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }, 0);
   }
 
@@ -355,6 +365,117 @@
         else { const ta = addRow(text, last.parentElement); addRow('', ta.parentElement).focus(); }
       }
     };
+  }
+
+  // ---------- Repeating goals ----------
+  // The first time the app looks at today, active repeating goals scheduled for today's
+  // weekday are copied into today's goals. last_added stops a goal coming back after you
+  // delete today's copy; a unique index stops duplicates if two devices do this at once.
+  let recurringCheckedFor = null, recurringRun = null;
+  function addRecurringForToday() {
+    const today = ymd();
+    if (recurringCheckedFor === today) return Promise.resolve();
+    return recurringRun ||= (async () => {
+      const wd = new Date().getDay();
+      const due = (await db.recurring()).filter((r) => r.active && r.weekdays.includes(wd) && (!r.last_added || r.last_added < today));
+      if (due.length) {
+        await q(sb.from('goals').upsert(
+          due.map((r) => ({ user_id: S.user.id, day: today, text: r.text, recurring_id: r.id, position: r.position - 1000 })),
+          { onConflict: 'user_id,day,recurring_id', ignoreDuplicates: true }));
+        await q(sb.from('recurring_goals').update({ last_added: today }).in('id', due.map((r) => r.id)));
+      }
+      recurringCheckedFor = today;
+    })().catch((e) => console.error('Repeating goals:', e)).finally(() => { recurringRun = null; });
+  }
+
+  // Shown Monday-first; values are JS getDay() (0 = Sunday).
+  const WEEK = [[1, 'M', 'Mon'], [2, 'T', 'Tue'], [3, 'W', 'Wed'], [4, 'T', 'Thu'], [5, 'F', 'Fri'], [6, 'S', 'Sat'], [0, 'S', 'Sun']];
+  const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+  function weekdaysLabel(days) {
+    const set = new Set(days);
+    if (set.size === 7) return 'Every day';
+    if (set.size === 5 && [1, 2, 3, 4, 5].every((d) => set.has(d))) return 'Weekdays';
+    if (set.size === 2 && set.has(0) && set.has(6)) return 'Weekends';
+    return WEEK.filter(([v]) => set.has(v)).map(([, , l]) => l).join(', ');
+  }
+  function weekdayPicker(days, onChange) {
+    const set = new Set(days);
+    return h('div', { class: 'wd-row', title: weekdaysLabel(days) }, WEEK.map(([v, l, full]) => h('button', {
+      class: 'wd' + (set.has(v) ? ' on' : ''), title: full, type: 'button',
+      onclick: () => {
+        if (set.has(v) && set.size === 1) return toast('Pick at least one day');
+        set.has(v) ? set.delete(v) : set.add(v);
+        onChange([...set].sort());
+      }
+    }, l)));
+  }
+
+  async function recurringManager() {
+    const body = h('div', {});
+    let newDays = ALL_DAYS;
+    const today = ymd();
+    // Today's unchecked copy of a repeating goal (the one that follows edits/removal).
+    const todaysCopy = (id) => ({ recurring_id: id, day: today, completed: false });
+
+    // After any change: recheck today, refresh the page underneath and this list.
+    const changed = async () => { recurringCheckedFor = null; await addRecurringForToday(); render(); await draw(); };
+    const act = (fn) => async (...a) => { try { await fn(...a); await changed(); } catch (e) { fail(e); } };
+
+    const editText = (r) => {
+      const inp = h('input', { class: 'input grow', value: r.text });
+      body.querySelector(`[data-id="${r.id}"] .t`).replaceWith(inp);
+      inp.focus(); inp.select();
+      let done = false;
+      const save = act(async () => {
+        if (done) return; done = true;
+        const text = inp.value.trim();
+        if (!text || text === r.text) return;
+        await db.updRecurring(r.id, { text });
+        await q(sb.from('goals').update({ text }).match(todaysCopy(r.id)));
+      });
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); save(); }
+        if (e.key === 'Escape') { e.stopPropagation(); done = true; draw(); }
+      }, true);
+      inp.addEventListener('blur', () => save());
+    };
+
+    async function draw() {
+      const list = await db.recurring();
+      const input = h('input', { class: 'input grow', placeholder: 'New repeating goal, e.g. "Read 20 pages"' });
+      const add = act(async () => {
+        const text = input.value.trim();
+        if (!text) return;
+        await db.addRecurring({ text, weekdays: newDays, position: list.length });
+        newDays = ALL_DAYS;
+      });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); add(); } }, true);
+      const picker = h('div', {});
+      const drawPicker = () => picker.replaceChildren(weekdayPicker(newDays, (d) => { newDays = d; drawPicker(); }));
+      drawPicker();
+
+      body.replaceChildren(
+        list.length === 0 && h('div', { class: 'empty' }, 'No repeating goals yet. Add habits you want on your list every morning.'),
+        list.map((r) => h('div', { class: 'rec-row' + (r.active ? '' : ' paused'), 'data-id': r.id },
+          h('input', { type: 'checkbox', class: 'check', checked: r.active, title: r.active ? 'On (uncheck to pause)' : 'Paused',
+            onchange: act((e) => db.updRecurring(r.id, { active: e.target.checked })) }),
+          h('span', { class: 't grow', title: 'Click to rename', onclick: () => editText(r) }, r.text,
+            !r.active && h('span', { class: 'muted small' }, ' · paused')),
+          weekdayPicker(r.weekdays, act((d) => db.updRecurring(r.id, { weekdays: d }))),
+          h('button', { class: 'icon-btn', title: 'Stop repeating', onclick: act(async () => {
+            if (!confirm(`Stop repeating "${r.text}"? Past days keep their history.`)) return;
+            await q(sb.from('goals').delete().match(todaysCopy(r.id)));
+            await db.delRecurring(r.id);
+          }) }, '✕'))),
+        h('div', { class: 'rec-add' }, input, picker, h('button', { class: 'btn primary', onclick: add }, 'Add')));
+      input.focus();
+    }
+
+    try { await draw(); } catch (e) { return fail(e); }
+    openModal('Repeating goals', body, [['Done', null, 'primary']], {
+      subtitle: 'Added to your list automatically each morning. Click a name to rename it, uncheck to pause.', ctrlEnter: false, enterSubmit: false
+    });
+    setTimeout(() => body.querySelector('.rec-add input')?.focus(), 0);
   }
 
   // ---------- Journal (history of days) ----------
@@ -898,7 +1019,7 @@
     const onKey = (e) => {
       if (e.key === 'Escape') { e.stopPropagation(); close(); }
       if (opts.ctrlEnter !== false && e.key === 'Enter' && (e.ctrlKey || e.metaKey) && primary >= 0) { e.preventDefault(); btns[primary].click(); }
-      if (e.key === 'Enter' && !e.ctrlKey && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && primary >= 0) { e.preventDefault(); btns[primary].click(); }
+      if (opts.enterSubmit !== false && e.key === 'Enter' && !e.ctrlKey && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox' && primary >= 0) { e.preventDefault(); btns[primary].click(); }
     };
     document.addEventListener('keydown', onKey, true);
     const overlay = h('div', { class: 'overlay', onmousedown: (e) => e.target === overlay && close() },
@@ -915,6 +1036,7 @@
     if (promptOpen || !S.user) return;
     promptOpen = true;
     try {
+      if (day === ymd()) await addRecurringForToday();
       const [goals, tasks] = await Promise.all([db.goals(day), db.tasks()]);
       const composer = taskComposer();
       const active = tasks.filter((t) => t.status !== 'done');
@@ -1002,6 +1124,7 @@
       const m = toMin(S.settings.morning_time), e = toMin(S.settings.evening_time);
       const today = ymd();
       if (S.view === 'today' && S.day !== today) { S.day = today; render(); } // rolled past midnight
+      await addRecurringForToday();
 
       if (mins >= e && due('e')) {
         markDone('m'); // too late for the morning prompt
@@ -1013,7 +1136,7 @@
         await eveningPrompt();
       } else if (mins >= m && mins < e && due('m')) {
         const goals = await db.goals(today);
-        if (goals.length) { markDone('m'); return; }
+        if (goals.some((g) => !g.recurring_id)) { markDone('m'); return; } // repeating goals alone still get the prompt
         markDone('m');
         desk?.notify({ title: 'DayGoal: good morning', body: 'What do you want to accomplish today?', action: 'morning' });
         desk?.show();
@@ -1033,6 +1156,7 @@
   function subscribe() {
     S.channel?.unsubscribe();
     S.channel = sb.channel('daygoal-' + S.user.id);
+    S.channel.on('postgres_changes', { event: '*', schema: 'public', table: 'recurring_goals', filter: `user_id=eq.${S.user.id}` }, () => { recurringCheckedFor = null; refresh(); });
     for (const table of ['goals', 'day_entries', 'tasks', 'notes']) {
       S.channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${S.user.id}` }, refresh);
     }
