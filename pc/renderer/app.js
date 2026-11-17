@@ -443,12 +443,21 @@
     async function draw() {
       const list = await db.recurring();
       const input = h('input', { class: 'input grow', placeholder: 'New repeating goal, e.g. "Read 20 pages"' });
-      const add = act(async () => {
+      const addBtn = h('button', { class: 'btn primary' }, 'Add');
+      // Lock while saving so a second Enter/click can't add the same goal twice.
+      let busy = false;
+      const add = async () => {
         const text = input.value.trim();
-        if (!text) return;
-        await db.addRecurring({ text, weekdays: newDays, position: list.length });
-        newDays = ALL_DAYS;
-      });
+        if (!text || busy) return;
+        if (list.some((r) => r.text.trim().toLowerCase() === text.toLowerCase())) return toast('That goal already repeats');
+        busy = input.disabled = addBtn.disabled = true;
+        try {
+          await db.addRecurring({ text, weekdays: newDays, position: list.length });
+          newDays = ALL_DAYS;
+          await changed();
+        } catch (e) { fail(e); busy = input.disabled = addBtn.disabled = false; }
+      };
+      addBtn.onclick = add;
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); add(); } }, true);
       const picker = h('div', {});
       const drawPicker = () => picker.replaceChildren(weekdayPicker(newDays, (d) => { newDays = d; drawPicker(); }));
@@ -467,7 +476,7 @@
             await q(sb.from('goals').delete().match(todaysCopy(r.id)));
             await db.delRecurring(r.id);
           }) }, '✕'))),
-        h('div', { class: 'rec-add' }, input, picker, h('button', { class: 'btn primary', onclick: add }, 'Add'))));
+        h('div', { class: 'rec-add' }, input, picker, addBtn)));
       input.focus();
     }
 
