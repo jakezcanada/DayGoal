@@ -165,7 +165,7 @@
     ['journal', 'Journal', 'Ctrl+2'],
     ['tasks', 'Long-term goals', 'Ctrl+3'],
     ['notes', 'Knowledge bank', 'Ctrl+4'],
-    ['stats', 'Stats', 'Ctrl+5'],
+    ['stats', 'Your Performance', 'Ctrl+5'],
     ['search', 'Search', 'Ctrl+F'],
     ['settings', 'Settings', '']
   ];
@@ -593,11 +593,11 @@
       .filter((d) => d && d <= today).sort()[0];
 
     const head = h('div', { class: 'head' },
-      h('div', {}, h('h1', {}, 'Stats'), h('div', { class: 'sub' }, 'How your days are actually going.')),
+      h('div', {}, h('h1', {}, 'Your Performance'), h('div', { class: 'sub' }, 'How your days are actually going.')),
       h('div', { class: 'tabs' }, RANGES.map(([id, label]) => h('button', {
         class: S.statsRange === id ? 'on' : '', onclick: () => { S.statsRange = id; lsSet('statsRange', id); render(); }
       }, label))));
-    if (!first) return h('div', {}, head, h('div', { class: 'card empty' }, 'No data yet. Plan a day and check things off to see stats here.'));
+    if (!first) return h('div', {}, head, h('div', { class: 'card empty' }, 'No data yet. Plan a day and check things off to see your performance here.'));
 
     const n = S.statsRange === 'all' ? null : Number(S.statsRange);
     const start = n ? addDays(today, -(n - 1)) : first;
