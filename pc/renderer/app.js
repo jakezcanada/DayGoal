@@ -269,7 +269,7 @@
       goals.length === 0 && h('div', { class: 'empty' }, 'No goals set yet.'),
       goals.map((g) => h('div', { class: 'goal' + (g.completed ? ' done' : '') },
         h('input', { type: 'checkbox', class: 'check', checked: g.completed, onchange: async (e) => { try { await db.updGoal(g.id, { completed: e.target.checked }); render(); } catch (err) { fail(err); } } }),
-        h('span', { class: 't', title: 'Double-click to edit', ondblclick: () => editGoal(g) }, g.text,
+        h('span', { class: 't', title: 'Double-click to edit', ondblclick: () => editGoal(g, goals) }, g.text,
           g.recurring_id && h('span', { class: 'rep', title: 'Repeating goal' }, ' ↻')),
         h('button', { class: 'icon-btn', title: 'Delete', onclick: async () => { try { await db.delGoal(g.id); render(); } catch (err) { fail(err); } } }, '✕'))),
       h('div', { class: 'add-row' }, addInput));
@@ -295,15 +295,32 @@
     return h('div', {}, head, goalsCard, doneCard, notesCard);
   }
 
-  function editGoal(g) {
+  // list = the day's goals in display order, so Shift+Up/Down can hop between them.
+  function editGoal(g, list = [g]) {
     const inp = h('textarea', { class: 'input task-input', rows: 1, value: g.text });
     autoGrow(inp);
-    const save = async () => { if (inp.value.trim()) await db.updGoal(g.id, { text: inp.value.trim() }); render(); };
+    const persist = async () => {
+      const text = inp.value.trim();
+      if (!text || text === g.text) return;
+      await db.updGoal(g.id, { text });
+      g.text = text; // keep the local list current if you hop back to this one
+    };
+    const save = async () => { await persist(); render(); };
+    let hopping = false;
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) { e.preventDefault(); save().then(() => activeClose?.(), fail); }
+      if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault();
+        const next = list[list.indexOf(g) + (e.key === 'ArrowUp' ? -1 : 1)];
+        if (!next || hopping) return;
+        hopping = true;
+        persist().then(() => { render(); editGoal(next, list); }, (err) => { hopping = false; fail(err); });
+      }
     });
+    const pos = list.length > 1 ? `Task ${list.indexOf(g) + 1} of ${list.length} · ` : '';
     openModal('Edit task', inp, [['Cancel', null], ['Save', save, 'primary']], {
-      subtitle: 'Enter to save · Shift+Enter for a new line' + (g.recurring_id ? ' · Changes this day only (edit the repeating goal under ↻ Repeating)' : '')
+      subtitle: pos + 'Enter to save · Shift+Enter for a new line' + (list.length > 1 ? ' · Shift+↑/↓ previous/next task' : '') +
+        (g.recurring_id ? ' · Changes this day only (edit the repeating goal under ↻ Repeating)' : '')
     });
     setTimeout(() => { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }, 0);
   }
@@ -342,9 +359,9 @@
           e.preventDefault();
           row.remove(); renumber();
           focusEnd(all[i - 1] || all[i + 1]);
-        } else if (e.key === 'ArrowUp' && ta.selectionStart === 0 && ta.selectionEnd === 0 && i > 0) {
+        } else if (e.key === 'ArrowUp' && i > 0 && (e.shiftKey || (ta.selectionStart === 0 && ta.selectionEnd === 0))) {
           e.preventDefault(); focusEnd(all[i - 1]);
-        } else if (e.key === 'ArrowDown' && ta.selectionStart === ta.value.length && all[i + 1]) {
+        } else if (e.key === 'ArrowDown' && all[i + 1] && (e.shiftKey || ta.selectionStart === ta.value.length)) {
           e.preventDefault(); focusEnd(all[i + 1]);
         }
       });
@@ -1056,7 +1073,7 @@
           h('div', { class: 'small muted', style: 'margin-bottom:4px' }, 'Already planned:'),
           goals.map((g) => h('div', { class: 'small', style: 'white-space:pre-wrap' }, (g.completed ? '✓ ' : '• ') + g.text))),
         composer.el,
-        h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Enter: next task · Shift+Enter: new line · Ctrl+Enter: save all'),
+        h('div', { class: 'small muted', style: 'margin-top:8px' }, 'Enter: next task · Shift+Enter: new line · Shift+↑/↓: move between tasks · Ctrl+Enter: save all'),
         active.length > 0 && h('div', { style: 'margin-top:12px' },
           h('div', { class: 'small muted' }, 'Pull from long-term goals:'),
           h('div', { class: 'chips' }, active.slice(0, 20).map((t) => {
